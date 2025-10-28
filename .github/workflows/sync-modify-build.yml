@@ -167,11 +167,25 @@ jobs:
         prerelease: true
 
     - name: Notify Feishu
-      if: github.event.inputs.release_tag != ''
       run: |
         # 获取最新提交信息
         COMMIT_MESSAGE=$(git log -1 --pretty=format:"%s")
         COMMIT_HASH=$(git rev-parse --short HEAD)
+        
+        # 检查是否提供了release_tag
+        if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+          TITLE="v2rayN 自动构建完成"
+          TEMPLATE="blue"
+          CONTENT="**版本标签**: ${{ github.event.inputs.release_tag }}\n**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH"
+          BUTTON1_TEXT="查看发布页面"
+          BUTTON1_URL="https://github.com/${{ github.repository }}/releases/tag/${{ github.event.inputs.release_tag }}"
+        else
+          TITLE="v2rayN 上游更新已同步"
+          TEMPLATE="green"
+          CONTENT="**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH\n**状态**: 已应用自定义修改并构建"
+          BUTTON1_TEXT="查看构建日志"
+          BUTTON1_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        fi
         
         # 构建飞书通知消息
         JSON_PAYLOAD=$(cat <<EOF
@@ -184,16 +198,16 @@ jobs:
             "header": {
               "title": {
                 "tag": "plain_text",
-                "content": "v2rayN 自动构建完成"
+                "content": "$TITLE"
               },
-              "template": "blue"
+              "template": "$TEMPLATE"
             },
             "elements": [
               {
                 "tag": "div",
                 "text": {
                   "tag": "lark_md",
-                  "content": "**版本标签**: ${{ github.event.inputs.release_tag }}\n**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH"
+                  "content": "$CONTENT"
                 }
               },
               {
@@ -203,70 +217,10 @@ jobs:
                     "tag": "button",
                     "text": {
                       "tag": "plain_text",
-                      "content": "查看发布页面"
+                      "content": "$BUTTON1_TEXT"
                     },
                     "type": "primary",
-                    "url": "https://github.com/${{ github.repository }}/releases/tag/${{ github.event.inputs.release_tag }}"
-                  },
-                  {
-                    "tag": "button",
-                    "text": {
-                      "tag": "plain_text",
-                      "content": "查看构建日志"
-                    },
-                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                  }
-                ]
-              }
-            ]
-          }
-        }
-        EOF
-        )
-        
-        # 发送到飞书机器人
-        curl -X POST -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "${{ secrets.FEISHU_WEBHOOK_URL }}"
-
-    - name: Notify Feishu (Sync Only)
-      if: github.event.inputs.release_tag == ''
-      run: |
-        # 获取最新提交信息
-        COMMIT_MESSAGE=$(git log -1 --pretty=format:"%s")
-        COMMIT_HASH=$(git rev-parse --short HEAD)
-        
-        # 构建飞书通知消息
-        JSON_PAYLOAD=$(cat <<EOF
-        {
-          "msg_type": "interactive",
-          "card": {
-            "config": {
-              "wide_screen_mode": true
-            },
-            "header": {
-              "title": {
-                "tag": "plain_text",
-                "content": "v2rayN 上游更新已同步"
-              },
-              "template": "green"
-            },
-            "elements": [
-              {
-                "tag": "div",
-                "text": {
-                  "tag": "lark_md",
-                  "content": "**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH\n**状态**: 已应用自定义修改并构建"
-                }
-              },
-              {
-                "tag": "action",
-                "actions": [
-                  {
-                    "tag": "button",
-                    "text": {
-                      "tag": "plain_text",
-                      "content": "查看构建日志"
-                    },
-                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    "url": "$BUTTON1_URL"
                   },
                   {
                     "tag": "button",
@@ -284,5 +238,13 @@ jobs:
         EOF
         )
         
+        # 检查飞书Webhook URL是否已配置
+        if [ -z "${{ secrets.FEISHU_WEBHOOK_URL }}" ]; then
+          echo "FEISHU_WEBHOOK_URL is not configured"
+          exit 0
+        fi
+        
         # 发送到飞书机器人
+        echo "Sending notification to Feishu..."
         curl -X POST -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "${{ secrets.FEISHU_WEBHOOK_URL }}"
+        echo "Notification sent"
