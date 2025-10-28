@@ -96,8 +96,6 @@
 
                     <MenuItem x:Name="menuHelp" Padding="{StaticResource MarginLr8}" Header="{x:Static resx:ResUI.menuHelp}" />
 
-                    <MenuItem x:Name="menuPromotion" Padding="{StaticResource MarginLr8}" Header="{x:Static resx:ResUI.menuPromotion}" />
-
                     <MenuItem x:Name="menuClose" Padding="{StaticResource MarginLr8}" Header="{x:Static resx:ResUI.menuExit}" />
                 </Menu>
             </DockPanel>
