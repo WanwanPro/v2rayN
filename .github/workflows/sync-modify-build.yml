@@ -1,0 +1,288 @@
+name: Sync, Modify and Build
+
+on:
+  schedule:
+    # 每天UTC时间08:00运行（北京时间16:00）
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: '强制同步上游更新'
+        required: false
+        default: 'false'
+      release_tag:
+        description: '发布版本标签（可选）'
+        required: false
+        type: string
+
+env:
+  UPSTREAM_REPO: "2dust/v2rayN"
+  UPSTREAM_BRANCH: "master"
+  OutputArch: "windows-64"
+  OutputArchArm: "windows-arm64"
+  OutputPath64:  "${{ github.workspace }}/v2rayN/Release/windows-64"
+  OutputPathArm64:  "${{ github.workspace }}/v2rayN/Release/windows-arm64"
+  OutputPath64Sc:  "${{ github.workspace }}/v2rayN/Release/windows-64-SelfContained"
+  # 自定义程序名称（留空则使用官方名称）
+  CUSTOM_APP_NAME: "v2rayNwanpro"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check-changes.outputs.has_changes }}
+      commit_hash: ${{ steps.get-commit.outputs.commit_hash }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Configure Git
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Add upstream remote
+      run: |
+        git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
+        git fetch upstream ${{ env.UPSTREAM_BRANCH }}
+
+    - name: Get latest upstream commit
+      id: get-commit
+      run: |
+        echo "commit_hash=$(git rev-parse upstream/${{ env.UPSTREAM_BRANCH }})" >> $GITHUB_OUTPUT
+
+    - name: Check for changes
+      id: check-changes
+      run: |
+        if [ "${{ github.event.inputs.force_sync }}" == "true" ]; then
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        else
+          # 检查上游是否有新的提交
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git rev-parse upstream/${{ env.UPSTREAM_BRANCH }})
+          
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+    - name: Merge upstream changes
+      if: steps.check-changes.outputs.has_changes == 'true'
+      run: |
+        git merge upstream/${{ env.UPSTREAM_BRANCH }} --no-edit
+
+    - name: Apply custom modifications
+      if: steps.check-changes.outputs.has_changes == 'true'
+      run: |
+        # 1. 修改程序名称（如果设置了自定义名称）
+        if [ -n "${{ env.CUSTOM_APP_NAME }}" ]; then
+          sed -i "s/public const string AppName = \"v2rayN\";/public const string AppName = \"${{ env.CUSTOM_APP_NAME }}\";/g" v2rayN/ServiceLib/Global.cs
+          sed -i "s/public const string AutoRunName = \"v2rayNAutoRun\";/public const string AutoRunName = \"${{ env.CUSTOM_APP_NAME }}AutoRun\";/g" v2rayN/ServiceLib/Global.cs
+        fi
+        
+        # 2. 移除推广菜单 - WPF版本
+        # 删除MainWindow.xaml中的推广菜单
+        sed -i '/<MenuItem x:Name="menuPromotion"/,/<\/MenuItem>/d' v2rayN/v2rayN/Views/MainWindow.xaml
+        # 删除推广菜单前后的分隔符
+        sed -i '/menuPromotion/,+1{/menuPromotion\|Separator/d}' v2rayN/v2rayN/Views/MainWindow.xaml
+        
+        # 删除MainWindow.xaml.cs中的推广菜单相关代码
+        sed -i '/menuPromotion.Click += menuPromotion_Click;/d' v2rayN/v2rayN/Views/MainWindow.xaml.cs
+        sed -i '/private void menuPromotion_Click/,/^    }/d' v2rayN/v2rayN/Views/MainWindow.xaml.cs
+        
+        # 3. 移除推广菜单 - Desktop版本
+        # 删除MainWindow.axaml中的推广菜单
+        sed -i '/<MenuItem x:Name="menuPromotion"/,/<\/MenuItem>/d' v2rayN/v2rayN.Desktop/Views/MainWindow.axaml
+        
+        # 删除MainWindow.axaml.cs中的推广菜单相关代码
+        sed -i '/menuPromotion.Click += menuPromotion_Click;/d' v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs
+        sed -i '/private void menuPromotion_Click/,/^    }/d' v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs
+
+    - name: Commit changes
+      if: steps.check-changes.outputs.has_changes == 'true'
+      run: |
+        git add .
+        git commit -m "Auto sync with upstream ${{ env.UPSTREAM_REPO }}@${{ steps.get-commit.outputs.commit_hash }} and apply custom modifications"
+        git push origin master
+
+  build:
+    needs: sync
+    if: needs.sync.outputs.has_changes == 'true'
+    strategy:
+      matrix:
+        configuration: [Release]
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup
+      uses: actions/setup-dotnet@v5.0.0
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Build
+      run: |
+        cd v2rayN 
+        dotnet publish ./v2rayN/v2rayN.csproj     -c Release -r win-x64   --self-contained=false -p:EnableWindowsTargeting=true -o $OutputPath64
+        dotnet publish ./v2rayN/v2rayN.csproj     -c Release -r win-arm64 --self-contained=false -p:EnableWindowsTargeting=true -o $OutputPathArm64
+        dotnet publish ./v2rayN/v2rayN.csproj     -c Release -r win-x64   --self-contained=true  -p:EnableWindowsTargeting=true -o $OutputPath64Sc
+        dotnet publish ./AmazTool/AmazTool.csproj -c Release -r win-x64   --self-contained=false -p:EnableWindowsTargeting=true -o $OutputPath64
+        dotnet publish ./AmazTool/AmazTool.csproj -c Release -r win-arm64 --self-contained=false -p:EnableWindowsTargeting=true -o $OutputPathArm64
+        dotnet publish ./AmazTool/AmazTool.csproj -c Release -r win-x64   --self-contained=true  -p:EnableWindowsTargeting=true -p:PublishTrimmed=true -o $OutputPath64Sc
+
+    - name: Package release zip archive
+      if: github.event.inputs.release_tag != ''
+      run: |
+        chmod 755 package-release-zip.sh
+        ./package-release-zip.sh $OutputArch $OutputPath64
+        ./package-release-zip.sh $OutputArchArm $OutputPathArm64
+        ./package-release-zip.sh "windows-64-SelfContained" $OutputPath64Sc
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4.6.2
+      with:
+        name: v2rayN-windows
+        path: |
+          ${{ github.workspace }}/v2rayN/Release/windows*
+        retention-days: 30
+
+    - name: Upload zip archive to release
+      if: github.event.inputs.release_tag != ''
+      uses: svenstaro/upload-release-action@v2
+      with:
+        file: ${{ github.workspace }}/v2rayN*.zip
+        tag: ${{ github.event.inputs.release_tag }}
+        file_glob: true
+        prerelease: true
+
+    - name: Notify Feishu
+      if: github.event.inputs.release_tag != ''
+      run: |
+        # 获取最新提交信息
+        COMMIT_MESSAGE=$(git log -1 --pretty=format:"%s")
+        COMMIT_HASH=$(git rev-parse --short HEAD)
+        
+        # 构建飞书通知消息
+        JSON_PAYLOAD=$(cat <<EOF
+        {
+          "msg_type": "interactive",
+          "card": {
+            "config": {
+              "wide_screen_mode": true
+            },
+            "header": {
+              "title": {
+                "tag": "plain_text",
+                "content": "v2rayN 自动构建完成"
+              },
+              "template": "blue"
+            },
+            "elements": [
+              {
+                "tag": "div",
+                "text": {
+                  "tag": "lark_md",
+                  "content": "**版本标签**: ${{ github.event.inputs.release_tag }}\n**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH"
+                }
+              },
+              {
+                "tag": "action",
+                "actions": [
+                  {
+                    "tag": "button",
+                    "text": {
+                      "tag": "plain_text",
+                      "content": "查看发布页面"
+                    },
+                    "type": "primary",
+                    "url": "https://github.com/${{ github.repository }}/releases/tag/${{ github.event.inputs.release_tag }}"
+                  },
+                  {
+                    "tag": "button",
+                    "text": {
+                      "tag": "plain_text",
+                      "content": "查看构建日志"
+                    },
+                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        EOF
+        )
+        
+        # 发送到飞书机器人
+        curl -X POST -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "${{ secrets.FEISHU_WEBHOOK_URL }}"
+
+    - name: Notify Feishu (Sync Only)
+      if: github.event.inputs.release_tag == ''
+      run: |
+        # 获取最新提交信息
+        COMMIT_MESSAGE=$(git log -1 --pretty=format:"%s")
+        COMMIT_HASH=$(git rev-parse --short HEAD)
+        
+        # 构建飞书通知消息
+        JSON_PAYLOAD=$(cat <<EOF
+        {
+          "msg_type": "interactive",
+          "card": {
+            "config": {
+              "wide_screen_mode": true
+            },
+            "header": {
+              "title": {
+                "tag": "plain_text",
+                "content": "v2rayN 上游更新已同步"
+              },
+              "template": "green"
+            },
+            "elements": [
+              {
+                "tag": "div",
+                "text": {
+                  "tag": "lark_md",
+                  "content": "**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH\n**状态**: 已应用自定义修改并构建"
+                }
+              },
+              {
+                "tag": "action",
+                "actions": [
+                  {
+                    "tag": "button",
+                    "text": {
+                      "tag": "plain_text",
+                      "content": "查看构建日志"
+                    },
+                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  },
+                  {
+                    "tag": "button",
+                    "text": {
+                      "tag": "plain_text",
+                      "content": "下载构建产物"
+                    },
+                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+        EOF
+        )
+        
+        # 发送到飞书机器人
+        curl -X POST -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "${{ secrets.FEISHU_WEBHOOK_URL }}"
