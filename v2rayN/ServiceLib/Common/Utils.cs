@@ -424,7 +424,7 @@ public class Utils
         // Handle IPv6 addresses, e.g., "[2001:db8::1]:443"
         if (authority.StartsWith("[") && authority.Contains("]"))
         {
-            int closingBracketIndex = authority.LastIndexOf(']');
+            var closingBracketIndex = authority.LastIndexOf(']');
             if (closingBracketIndex < authority.Length - 1 && authority[closingBracketIndex + 1] == ':')
             {
                 // Port exists
@@ -963,13 +963,13 @@ public class Utils
 
     #region Platform
 
-    public static bool IsWindows() => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+    public static bool IsWindows() => OperatingSystem.IsWindows();
 
-    public static bool IsLinux() => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+    public static bool IsLinux() => OperatingSystem.IsLinux();
 
-    public static bool IsOSX() => RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+    public static bool IsOSX() => OperatingSystem.IsMacOS();
 
-    public static bool IsNonWindows() => !RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+    public static bool IsNonWindows() => !OperatingSystem.IsWindows();
 
     public static string GetExeName(string name)
     {

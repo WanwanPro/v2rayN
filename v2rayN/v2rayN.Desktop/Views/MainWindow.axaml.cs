@@ -21,7 +21,7 @@ public partial class MainWindow : WindowBase<MainWindowViewModel>
         _config = AppManager.Instance.Config;
         _manager = new WindowNotificationManager(TopLevel.GetTopLevel(this)) { MaxItems = 3, Position = NotificationPosition.TopRight };
 
-        this.KeyDown += MainWindow_KeyDown;
+        KeyDown += MainWindow_KeyDown;
         menuSettingsSetUWP.Click += menuSettingsSetUWP_Click;
         menuCheckUpdate.Click += MenuCheckUpdate_Click;
         menuBackupAndRestore.Click += MenuBackupAndRestore_Click;
@@ -152,14 +152,14 @@ public partial class MainWindow : WindowBase<MainWindowViewModel>
 
         if (Utils.IsWindows())
         {
-            this.Title = $"{Utils.GetVersion()} - {(Utils.IsAdministrator() ? ResUI.RunAsAdmin : ResUI.NotRunAsAdmin)}";
+            Title = $"{Utils.GetVersion()} - {(Utils.IsAdministrator() ? ResUI.RunAsAdmin : ResUI.NotRunAsAdmin)}";
 
             ThreadPool.RegisterWaitForSingleObject(Program.ProgramStarted, OnProgramStarted, null, -1, false);
             HotkeyManager.Instance.Init(_config, OnHotkeyHandler);
         }
         else
         {
-            this.Title = $"{Utils.GetVersion()}";
+            Title = $"{Utils.GetVersion()}";
 
             menuRebootAsAdmin.IsVisible = false;
             menuSettingsSetUWP.IsVisible = false;
@@ -167,9 +167,9 @@ public partial class MainWindow : WindowBase<MainWindowViewModel>
         }
         menuAddServerViaScan.IsVisible = false;
 
-        if (_config.UiItem.AutoHideStartup)
+        if (_config.UiItem.AutoHideStartup && Utils.IsWindows())
         {
-            this.WindowState = WindowState.Minimized;
+            WindowState = WindowState.Minimized;
         }
 
         AddHelpMenuItem();
@@ -396,32 +396,32 @@ public partial class MainWindow : WindowBase<MainWindowViewModel>
     public void ShowHideWindow(bool? blShow)
     {
         var bl = blShow ??
-                    Utils.IsLinux()
+                    (Utils.IsLinux()
                     ? (!_config.UiItem.ShowInTaskbar ^ (WindowState == WindowState.Minimized))
-                    : !_config.UiItem.ShowInTaskbar;
+                    : !_config.UiItem.ShowInTaskbar);
         if (bl)
         {
-            this.Show();
-            if (this.WindowState == WindowState.Minimized)
+            Show();
+            if (WindowState == WindowState.Minimized)
             {
-                this.WindowState = WindowState.Normal;
+                WindowState = WindowState.Normal;
             }
-            this.Activate();
-            this.Focus();
+            Activate();
+            Focus();
         }
         else
         {
             if (Utils.IsLinux() && _config.UiItem.Hide2TrayWhenClose == false)
             {
-                this.WindowState = WindowState.Minimized;
+                WindowState = WindowState.Minimized;
                 return;
             }
 
-            foreach (var ownedWindow in this.OwnedWindows)
+            foreach (var ownedWindow in OwnedWindows)
             {
                 ownedWindow.Close();
             }
-            this.Hide();
+            Hide();
         }
 
         _config.UiItem.ShowInTaskbar = bl;
