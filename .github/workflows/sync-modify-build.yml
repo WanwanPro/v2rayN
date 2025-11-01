@@ -32,6 +32,7 @@ jobs:
     outputs:
       has_changes: ${{ steps.check-changes.outputs.has_changes }}
       commit_hash: ${{ steps.get-commit.outputs.commit_hash }}
+      release_tag: ${{ steps.generate-tag.outputs.release_tag }}
 
     steps:
     - name: Checkout
@@ -70,6 +71,19 @@ jobs:
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
+        fi
+
+    - name: Generate release tag
+      id: generate-tag
+      if: steps.check-changes.outputs.has_changes == 'true'
+      run: |
+        # 如果手动提供了release_tag，使用它；否则自动生成
+        if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+          echo "release_tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+        else
+          # 自动生成版本标签：v + 日期 + 时间戳
+          TAG="v$(date +'%Y%m%d')-$(date +'%H%M')"
+          echo "release_tag=$TAG" >> $GITHUB_OUTPUT
         fi
 
     - name: Merge upstream changes
@@ -142,7 +156,7 @@ jobs:
         dotnet publish ./AmazTool/AmazTool.csproj -c Release -r win-x64   --self-contained=true  -p:EnableWindowsTargeting=true -p:PublishTrimmed=true -o $OutputPath64Sc
 
     - name: Package release zip archive
-      if: github.event.inputs.release_tag != ''
+      if: needs.sync.outputs.has_changes == 'true'
       run: |
         chmod 755 package-release-zip.sh
         ./package-release-zip.sh $OutputArch $OutputPath64
@@ -158,11 +172,11 @@ jobs:
         retention-days: 30
 
     - name: Upload zip archive to release
-      if: github.event.inputs.release_tag != ''
+      if: needs.sync.outputs.has_changes == 'true'
       uses: svenstaro/upload-release-action@v2
       with:
         file: ${{ github.workspace }}/v2rayN*.zip
-        tag: ${{ github.event.inputs.release_tag }}
+        tag: ${{ needs.sync.outputs.release_tag }}
         file_glob: true
         prerelease: true
 
@@ -172,20 +186,8 @@ jobs:
         COMMIT_MESSAGE=$(git log -1 --pretty=format:"%s")
         COMMIT_HASH=$(git rev-parse --short HEAD)
         
-        # 检查是否提供了release_tag
-        if [ -n "${{ github.event.inputs.release_tag }}" ]; then
-          TITLE="v2rayN 自动构建完成"
-          TEMPLATE="blue"
-          CONTENT="**版本标签**: ${{ github.event.inputs.release_tag }}\n**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH"
-          BUTTON1_TEXT="查看发布页面"
-          BUTTON1_URL="https://github.com/${{ github.repository }}/releases/tag/${{ github.event.inputs.release_tag }}"
-        else
-          TITLE="v2rayN 上游更新已同步"
-          TEMPLATE="green"
-          CONTENT="**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH\n**状态**: 已应用自定义修改并构建"
-          BUTTON1_TEXT="查看构建日志"
-          BUTTON1_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        fi
+        # 获取release_tag
+        RELEASE_TAG="${{ needs.sync.outputs.release_tag }}"
         
         # 构建飞书通知消息
         JSON_PAYLOAD=$(cat <<EOF
@@ -198,16 +200,16 @@ jobs:
             "header": {
               "title": {
                 "tag": "plain_text",
-                "content": "$TITLE"
+                "content": "v2rayN 自动构建完成"
               },
-              "template": "$TEMPLATE"
+              "template": "blue"
             },
             "elements": [
               {
                 "tag": "div",
                 "text": {
                   "tag": "lark_md",
-                  "content": "$CONTENT"
+                  "content": "**版本标签**: $RELEASE_TAG\n**提交信息**: $COMMIT_MESSAGE\n**提交哈希**: $COMMIT_HASH\n**状态**: 已应用自定义修改并构建"
                 }
               },
               {
@@ -217,10 +219,10 @@ jobs:
                     "tag": "button",
                     "text": {
                       "tag": "plain_text",
-                      "content": "$BUTTON1_TEXT"
+                      "content": "查看发布页面"
                     },
                     "type": "primary",
-                    "url": "$BUTTON1_URL"
+                    "url": "https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
                   },
                   {
                     "tag": "button",
@@ -228,7 +230,7 @@ jobs:
                       "tag": "plain_text",
                       "content": "下载构建产物"
                     },
-                    "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    "url": "https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
                   }
                 ]
               }
