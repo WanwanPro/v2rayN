@@ -75,7 +75,7 @@ jobs:
 
     - name: Generate release tag
       id: generate-tag
-      if: steps.check-changes.outputs.has_changes == 'true'
+      if: steps.check-changes.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
       run: |
         # 如果手动提供了release_tag，使用它；否则自动生成
         if [ -n "${{ github.event.inputs.release_tag }}" ]; then
@@ -122,12 +122,17 @@ jobs:
       if: steps.check-changes.outputs.has_changes == 'true'
       run: |
         git add .
-        git commit -m "Auto sync with upstream ${{ env.UPSTREAM_REPO }}@${{ steps.get-commit.outputs.commit_hash }} and apply custom modifications"
-        git push origin master
+        # 检查是否有更改需要提交
+        if git diff-index --quiet HEAD; then
+          echo "No changes to commit"
+        else
+          git commit -m "Auto sync with upstream ${{ env.UPSTREAM_REPO }}@${{ steps.get-commit.outputs.commit_hash }} and apply custom modifications"
+          git push origin master
+        fi
 
   build:
     needs: sync
-    if: needs.sync.outputs.has_changes == 'true'
+    if: needs.sync.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
     strategy:
       matrix:
         configuration: [Release]
@@ -156,7 +161,7 @@ jobs:
         dotnet publish ./AmazTool/AmazTool.csproj -c Release -r win-x64   --self-contained=true  -p:EnableWindowsTargeting=true -p:PublishTrimmed=true -o $OutputPath64Sc
 
     - name: Package release zip archive
-      if: needs.sync.outputs.has_changes == 'true'
+      if: needs.sync.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
       run: |
         chmod 755 package-release-zip.sh
         ./package-release-zip.sh $OutputArch $OutputPath64
@@ -172,7 +177,7 @@ jobs:
         retention-days: 30
 
     - name: Upload zip archive to release
-      if: needs.sync.outputs.has_changes == 'true'
+      if: needs.sync.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
       uses: svenstaro/upload-release-action@v2
       with:
         file: ${{ github.workspace }}/v2rayN*.zip
