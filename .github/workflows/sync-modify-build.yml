@@ -1,9 +1,6 @@
 name: Sync, Modify and Build
 
 on:
-  schedule:
-    # 每天UTC时间08:00运行（北京时间16:00）
-    - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
       force_sync:
@@ -89,7 +86,39 @@ jobs:
     - name: Merge upstream changes
       if: steps.check-changes.outputs.has_changes == 'true'
       run: |
-        git merge upstream/${{ env.UPSTREAM_BRANCH }} --no-edit
+        git merge upstream/${{ env.UPSTREAM_BRANCH }} --no-edit || echo "Merge conflicts detected, attempting auto-resolution"
+
+    - name: Auto-resolve known merge conflicts
+      if: steps.check-changes.outputs.has_changes == 'true'
+      run: |
+        # 自动解决MainWindow.axaml.cs的冲突
+        if grep -q "<<<<<<<" v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs; then
+          echo "Resolving conflicts in MainWindow.axaml.cs"
+          # 保留我们的版本（删除冲突标记和上游版本）
+          sed -i '/<<<<<<< HEAD/,/=======/!b; /=======/,/>>>>>>> upstream/d; /<<<<<<< HEAD/d' v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs
+          sed -i '/<<<<<<< HEAD/,/=======/d' v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs
+          sed -i '/=======/,/>>>>>>> upstream/d' v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs
+          sed -i '/>>>>>>> upstream/d' v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs
+        fi
+        
+        # 自动解决MainWindow.xaml.cs的冲突
+        if grep -q "<<<<<<<" v2rayN/v2rayN/Views/MainWindow.xaml.cs; then
+          echo "Resolving conflicts in MainWindow.xaml.cs"
+          # 保留我们的版本（删除冲突标记和上游版本）
+          sed -i '/<<<<<<< HEAD/,/=======/!b; /=======/,/>>>>>>> upstream/d; /<<<<<<< HEAD/d' v2rayN/v2rayN/Views/MainWindow.xaml.cs
+          sed -i '/<<<<<<< HEAD/,/=======/d' v2rayN/v2rayN/Views/MainWindow.xaml.cs
+          sed -i '/=======/,/>>>>>>> upstream/d' v2rayN/v2rayN/Views/MainWindow.xaml.cs
+          sed -i '/>>>>>>> upstream/d' v2rayN/v2rayN/Views/MainWindow.xaml.cs
+        fi
+        
+        # 添加解决冲突后的文件
+        git add v2rayN/v2rayN.Desktop/Views/MainWindow.axaml.cs
+        git add v2rayN/v2rayN/Views/MainWindow.xaml.cs
+        
+        # 如果有冲突解决，提交更改
+        if ! git diff --cached --quiet; then
+          git commit -m "Auto-resolve merge conflicts"
+        fi
 
     - name: Apply custom modifications
       if: steps.check-changes.outputs.has_changes == 'true'
